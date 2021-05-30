@@ -127,6 +127,7 @@ class Loop:
     """
     It's your task host.  You run() it and it manages your main application loop.
     """
+    task_dict = {}
 
     def __init__(self, debug=False):
         self._tasks = []
@@ -214,6 +215,8 @@ class Loop:
         """
         assert coroutine_function is not None, 'coroutine function must not be none'
         task = ScheduledTask(self, hz, coroutine_function, args, kwargs)
+        # self.task_dict.append(task)
+        self.task_dict.update({coroutine_function.__name__:task})
         task.start()
         return task
 
@@ -278,7 +281,7 @@ class Loop:
                 # and nothing else is scheduled to run for this long.
                 # This is the real sleep. If/when interrupts are implemented this will likely need to change.
                 sleep_seconds = sleep_nanos / 1000000000.0
-                self._debug('No active tasks.  Sleeping for ', sleep_seconds, 's. \n', self._sleeping)
+                self._debug('No active tasks.  Sleeping for ', sleep_seconds, 'ns. \n', self._sleeping)
                 time.sleep(sleep_seconds)
 
     def _run_task(self, task: Task):

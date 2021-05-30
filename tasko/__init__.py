@@ -31,5 +31,6 @@ schedule = get_loop().schedule
 schedule_later = get_loop().schedule_later
 sleep = get_loop().sleep
 suspend = get_loop().suspend
+tasks = get_loop().task_dict
 
 run = get_loop().run
