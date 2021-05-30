@@ -76,6 +76,7 @@ class ScheduledTask:
         self._stop = False
         self._running = False
         self._scheduled_to_run = False
+        self.name = forward_async_fn.__name__
 
     async def _run_at_fixed_rate(self):
         self._scheduled_to_run = True
