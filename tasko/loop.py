@@ -78,6 +78,13 @@ class ScheduledTask:
         self._scheduled_to_run = False
         self.name = forward_async_fn.__name__
 
+    @property
+    def hz(self):
+        return 1 / (self._nanoseconds_per_invocation / 1000000000)
+    @hz.setter
+    def hz(self,value):
+        self._nanoseconds_per_invocation = (1 / value) * 1000000000
+
     async def _run_at_fixed_rate(self):
         self._scheduled_to_run = True
         try:
@@ -113,9 +120,9 @@ class ScheduledTask:
             self._scheduled_to_run = False
 
     def __repr__(self):
-        hz = 1 / (self._nanoseconds_per_invocation / 1000000000)
+        # hz = 1 / (self._nanoseconds_per_invocation / 1000000000)
         state = 'running' if self._running else 'waiting'
-        return '{{ScheduledTask {} rate: {}hz, fn: {}}}'.format(state, hz, self._forward_async_fn)
+        return '{{ScheduledTask {} rate: {}hz, fn: {}}}'.format(state, self.hz, self._forward_async_fn)
 
     __str__ = __repr__
 
@@ -158,7 +165,7 @@ class Loop:
         :param seconds: Floating point; will wait at least this long to call your task again.
         """
         await self._sleep_until_nanos(_get_future_nanos(seconds))
-    
+
     def run_later(self, seconds_to_delay, awaitable_task):
         """
         Add a concurrent task, delayed by some seconds.
@@ -216,7 +223,6 @@ class Loop:
         """
         assert coroutine_function is not None, 'coroutine function must not be none'
         task = ScheduledTask(self, hz, coroutine_function, args, kwargs)
-        # self.task_dict.append(task)
         self.task_dict.update({coroutine_function.__name__:task})
         task.start()
         return task
