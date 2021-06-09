@@ -110,7 +110,7 @@ class ScheduledTask:
                     return  # Check before running
 
                 iteration = self._forward_async_fn(*self._forward_args, **self._forward_kwargs)
-                self._loop._debug('iteration ', iteration)
+                self._loop._debug('  iteration ', iteration)
 
                 self._running = True
                 try:
@@ -281,16 +281,18 @@ class Loop:
         """
 
         assert self._current is None, 'Loop can only be advanced by 1 stack frame at a time.'
+        self._loopnum = 0
         while self._tasks or self._sleeping:
-            self._debug('---- sleeping tasks', len(self._sleeping), '\n---- active tasks', len(self._tasks))
+            self._debug('[{}] ---- sleeping: {}, active: {}'.format(self._loopnum,len(self._sleeping),len(self._tasks)))
             self._step()
             self._debug('\n')
+            self._loopnum+=1
         # while self._tasks or self._sleeping:
             # self._step()
         self._debug('Loop completed', self._tasks, self._sleeping)
 
     def _step(self):
-        self._debug('stepping over ', len(self._tasks), ' tasks')
+        self._debug('  stepping over ', len(self._tasks), ' tasks')
 
         #Sort tasks by priority
         self._tasks.sort(key=Task.priority_sort)
@@ -324,7 +326,7 @@ class Loop:
                 # and nothing else is scheduled to run for this long.
                 # This is the real sleep. If/when interrupts are implemented this will likely need to change.
                 sleep_seconds = sleep_nanos / 1000000000.0
-                self._debug('No active tasks.  Sleeping for ', sleep_seconds, 's. \n', self._sleeping)
+                self._debug('  No active tasks.  Sleeping for ', sleep_seconds, 's. \n', self._sleeping)
 
                 time.sleep(sleep_seconds)
 
@@ -337,14 +339,14 @@ class Loop:
         try:
 
             task.coroutine.send(None)
-            self._debug('current', self._current)
+            self._debug('  current', self._current)
             # Sleep gate here, in case the current task suspended.
             # If a sleeping task re-suspends it will have already put itself in the sleeping queue.
             if self._current is not None:
                 self._tasks.append(task)
         except StopIteration:
             # This task is all done.
-            self._debug('task complete')
+            self._debug('  task complete')
             pass
         finally:
             self._current = None
@@ -360,9 +362,12 @@ class Loop:
 
         #Sort the sleep list by priority and then resumption time (ORDER MATTERS!).
         self._sleeping.sort(key=lambda x : (x._resume_nanos,x.task.priority))
+        self._debug('  sleeping list (sorted):')
+        for i in self._sleeping:
+            self._debug('    {}'.format(i))
 
         #self._sleeping.sort(key=Sleeper.resume_nanos)  # heap would be better but hey.
-        self._debug('sleeping ', self._current)
+        self._debug('  sleeping ', self._current)
         self._current = None
         # Pretty subtle here.  This yields once, then it continues next time the task scheduler executes it.
         # The async function is parked at this point.
