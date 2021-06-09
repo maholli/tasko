@@ -1,3 +1,15 @@
+#Changes In a Nutshell:
+#1) Changed the tasko.schedule fn.
+#   Schedule using tasko.schedule(hz, async_fn, priority, *args, **kwargs) now.
+#2) Changed the Task class to include a priority level.
+#3) In Loop._step(), sort the task list by priority, at the beginning.
+#4) In Loop._sleep_until_nanos() sort the sleeper list by priority
+#   and then by sleep time.
+
+# NOTE: If two tasks have the same priority, scheduler decides which
+#       to run first
+
+
 import time
 
 _monotonic_ns = time.monotonic_ns
@@ -32,6 +44,9 @@ class Sleeper:
     def resume_nanos(self):
         return self._resume_nanos
 
+    def priority_sort(self):
+        return self.task.priority
+
     def __repr__(self):
         return '{{Sleeper remaining: {:.2f}, task: {} }}'.format(
             (self.resume_nanos() - _monotonic_ns()) / 1000000000.0,
@@ -42,16 +57,22 @@ class Sleeper:
 
 
 class Task:
-    def __init__(self, coroutine):
+    def __init__(self, coroutine, priority):
+        #Added a priority level
         self.coroutine = coroutine
+        self.priority=priority
+
+    def priority_sort(self):
+        return self.priority
 
     def __repr__(self):
-        return '{{Task {}}}'.format(self.coroutine)
+        return '{{Task {}, Priority {}}}'.format(self.coroutine, self.priority)
 
     __str__ = __repr__
 
 
 class ScheduledTask:
+
     def change_rate(self, hz):
         ### Update the task rate to a new frequency ###
         self._nanoseconds_per_invocation = (1 / hz) * 1000000000
@@ -65,9 +86,10 @@ class ScheduledTask:
         self._stop = False
         if not self._scheduled_to_run:
             # Don't double-up the task if it's still in the run list!
-            self._loop.add_task(self._run_at_fixed_rate())
+            #print("Added task to loop._task")
+            self._loop.add_task(self._run_at_fixed_rate(), self._priority)
 
-    def __init__(self, loop, hz, forward_async_fn, forward_args, forward_kwargs):
+    def __init__(self, loop, hz, forward_async_fn, priority, forward_args, forward_kwargs):
         self._loop = loop
         self._forward_async_fn = forward_async_fn
         self._forward_args = forward_args
@@ -76,6 +98,8 @@ class ScheduledTask:
         self._stop = False
         self._running = False
         self._scheduled_to_run = False
+        #Added a priority level
+        self._priority= priority
 
     async def _run_at_fixed_rate(self):
         self._scheduled_to_run = True
@@ -101,8 +125,10 @@ class ScheduledTask:
                 # just go as fast as possible & schedule to run "now." If we catch back up again
                 # we'll return to seconds_per_invocation without doing a bunch of catchup runs.
                 target_run_nanos = target_run_nanos + self._nanoseconds_per_invocation
+                #print('target_run_nanos is ', target_run_nanos)
                 now_nanos = _monotonic_ns()
                 if now_nanos <= target_run_nanos:
+                    #print("Going to put to sleep")
                     await self._loop._sleep_until_nanos(target_run_nanos)
                 else:
                     target_run_nanos = now_nanos
@@ -137,7 +163,7 @@ class Loop:
         else:
             self._debug = lambda *arg, **kwargs: None
 
-    def add_task(self, awaitable_task):
+    def add_task(self, awaitable_task, priority):
         """
         Add a concurrent task (known as a coroutine, implemented as a generator in CircuitPython)
         Use:
@@ -145,7 +171,8 @@ class Loop:
         :param awaitable_task:  The coroutine to be concurrently driven to completion.
         """
         self._debug('adding task ', awaitable_task)
-        self._tasks.append(Task(awaitable_task))
+        #Added a priority parameter
+        self._tasks.append(Task(awaitable_task, priority))
 
     async def sleep(self, seconds):
         """
@@ -156,8 +183,8 @@ class Loop:
         :param seconds: Floating point; will wait at least this long to call your task again.
         """
         await self._sleep_until_nanos(_get_future_nanos(seconds))
-    
-    def run_later(self, seconds_to_delay, awaitable_task):
+
+    def run_later(self, seconds_to_delay, awaitable_task, priority):
         """
         Add a concurrent task, delayed by some seconds.
         Use:
@@ -170,7 +197,8 @@ class Loop:
         async def _run_later():
             await self._sleep_until_nanos(start_nanos)
             await awaitable_task
-        self.add_task(_run_later())
+        #Added a priority parameter
+        self.add_task(_run_later(), priority)
 
     def suspend(self):
         """
@@ -191,7 +219,7 @@ class Loop:
         self._current = None
         return _yield_once(), resume
 
-    def schedule(self, hz: float, coroutine_function, *args, **kwargs):
+    def schedule(self, hz: float, coroutine_function, priority, *args, **kwargs):
         """
         Describe how often a method should be called.
 
@@ -212,12 +240,13 @@ class Loop:
         :param coroutine_function: the async def function you want invoked on your schedule
         :param event_loop: An event loop that can .sleep() and .add_task.  Like BudgetEventLoop.
         """
+        #print("Entered schedule")
         assert coroutine_function is not None, 'coroutine function must not be none'
-        task = ScheduledTask(self, hz, coroutine_function, args, kwargs)
+        task = ScheduledTask(self, hz, coroutine_function, priority, args, kwargs)
         task.start()
         return task
 
-    def schedule_later(self, hz: float, coroutine_function, *args, **kwargs):
+    def schedule_later(self, hz: float, coroutine_function, priority, *args, **kwargs):
         """
         Like schedule, but invokes the coroutine_function after the first hz interval.
 
@@ -232,7 +261,7 @@ class Loop:
                 await _yield_once()
                 ran_once = True
 
-        return self.schedule(hz, call_later)
+        return self.schedule(hz, call_later, priority)
 
     def run(self):
         """
@@ -250,43 +279,63 @@ class Loop:
         The crucial StopIteration exception signifies the end of a coroutine in CircuitPython.
         Other Exceptions that reach the runner break out, stopping your app and showing a stack trace.
         """
+
         assert self._current is None, 'Loop can only be advanced by 1 stack frame at a time.'
         while self._tasks or self._sleeping:
+            self._debug('---- sleeping tasks', len(self._sleeping), '\n---- active tasks', len(self._tasks))
             self._step()
+            self._debug('\n')
+        # while self._tasks or self._sleeping:
+            # self._step()
         self._debug('Loop completed', self._tasks, self._sleeping)
 
     def _step(self):
         self._debug('stepping over ', len(self._tasks), ' tasks')
+
+        #Sort tasks by priority
+        self._tasks.sort(key=Task.priority_sort)
+
         for _ in range(len(self._tasks)):
+
             task = self._tasks.pop(0)
             self._run_task(task)
+
         # Consider each sleeping function at most once (avoids sleep(0) problems)
         for i in range(len(self._sleeping)):
+
             sleeper = self._sleeping[0]
             now_nanos = _monotonic_ns()
+
             if now_nanos >= sleeper.resume_nanos():
+
                 self._sleeping.pop(0)
                 self._run_task(sleeper.task)
             else:
                 # We didn't pop the task and it wasn't time to run it.  Only later tasks past this one.
+
                 break
         if len(self._tasks) == 0 and len(self._sleeping) > 0:
             next_sleeper = self._sleeping[0]
+
             sleep_nanos = next_sleeper.resume_nanos() - _monotonic_ns()
+
             if sleep_nanos > 0:
                 # Give control to the system, there's nothing to be done right now,
                 # and nothing else is scheduled to run for this long.
                 # This is the real sleep. If/when interrupts are implemented this will likely need to change.
                 sleep_seconds = sleep_nanos / 1000000000.0
                 self._debug('No active tasks.  Sleeping for ', sleep_seconds, 's. \n', self._sleeping)
+
                 time.sleep(sleep_seconds)
 
     def _run_task(self, task: Task):
         """
         Runs a task and re-queues for the next loop if it is both (1) not complete and (2) not sleeping.
         """
+
         self._current = task
         try:
+
             task.coroutine.send(None)
             self._debug('current', self._current)
             # Sleep gate here, in case the current task suspended.
@@ -305,9 +354,14 @@ class Loop:
         From within a coroutine, sleeps until the target time.monotonic_ns
         Returns the thing to await
         """
+
         assert self._current is not None, 'You can only sleep from within a task'
         self._sleeping.append(Sleeper(target_run_nanos, self._current))
-        self._sleeping.sort(key=Sleeper.resume_nanos)  # heap would be better but hey.
+
+        #Sort the sleep list by priority and then resumption time (ORDER MATTERS!).
+        self._sleeping.sort(key=lambda x : (x._resume_nanos,x.task.priority))
+
+        #self._sleeping.sort(key=Sleeper.resume_nanos)  # heap would be better but hey.
         self._debug('sleeping ', self._current)
         self._current = None
         # Pretty subtle here.  This yields once, then it continues next time the task scheduler executes it.
