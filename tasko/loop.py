@@ -154,6 +154,7 @@ class Loop:
         self._sleeping = []
         self._ready = []
         self._current = None
+        self.debug=debug
         if debug:
             self._debug = print
         else:
@@ -240,7 +241,6 @@ class Loop:
         :param coroutine_function: the async def function you want invoked on your schedule
         :param event_loop: An event loop that can .sleep() and .add_task.  Like BudgetEventLoop.
         """
-        # print("Entered schedule")
         assert coroutine_function is not None, "coroutine function must not be none"
         task = ScheduledTask(self, hz, coroutine_function, priority, args, kwargs)
         task.start()
@@ -309,31 +309,21 @@ class Loop:
             task = self._tasks.pop(0)
             self._run_task(task)
 
-        self._debug("  sleeping list (unsorted):")
-        for i in self._sleeping:
-            self._debug("    {}".format(i))
+        if self.debug:
+            self._debug("  sleeping list (unsorted):")
+            for i in self._sleeping:
+                self._debug("    {}".format(i))
+
         #Create the ready list based on whichever tasks are ready to be executed
         self._ready = [x for x in self._sleeping if x.resume_nanos() <= _monotonic_ns()]
         #Sort the ready tasks based on priority
         self._ready.sort(key=lambda x: x.task.priority)
-        self._debug("  ready list (sorted)")
-        for i in self._ready:
-            self._debug("    {}".format(i))
 
-        # Consider each sleeping function at most once (avoids sleep(0) problems)
-        #        for i in range(len(self._sleeping)):
+        if self.debug:
+            self._debug("  ready list (sorted)")
+            for i in self._ready:
+                self._debug("    {}".format(i))
 
-        #            sleeper = self._sleeping[0]
-        #            now_nanos = _monotonic_ns()
-
-        #            if now_nanos >= sleeper.resume_nanos():
-
-        #                self._sleeping.pop(0)
-        #                self._run_task(sleeper.task)
-        #            else:
-        # We didn't pop the task and it wasn't time to run it.  Only later tasks past this one.
-
-        #                break
 
         #Run the ready tasks, and simultaneously remove them from the _sleeping and _ready lists
         for i in range(len(self._ready)):
@@ -393,21 +383,11 @@ class Loop:
         From within a coroutine, sleeps until the target time.monotonic_ns
         Returns the thing to await
         """
-
         assert self._current is not None, "You can only sleep from within a task"
         self._sleeping.append(Sleeper(target_run_nanos, self._current))
-
-        # Sort the sleep list by priority and then resumption time (ORDER MATTERS!).
-        # self._sleeping.sort(key=lambda x : (x._resume_nanos,x.task.priority))
-        '''
-        self._debug("  sleeping list (unsorted):")
-        for i in self._sleeping:
-            self._debug("    {}".format(i))
-        '''
-
-        # self._sleeping.sort(key=Sleeper.resume_nanos)  # heap would be better but hey.
         self._debug("  sleeping ", self._current)
         self._current = None
         # Pretty subtle here.  This yields once, then it continues next time the task scheduler executes it.
         # The async function is parked at this point.
         await _yield_once()
+
