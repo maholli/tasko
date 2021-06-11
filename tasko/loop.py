@@ -1,3 +1,15 @@
+'''
+CHANGES MADE:
+
+1) Created a _ready list that keeps track of all tasks ready to be executed.
+2) Sort this _ready list based on priority.
+3) Don't sort the _sleeping list in _sleep_until_nanos, as it adds latency.
+   Instead, sort it in _step, only when the system is ACTUALLY going to sleep.
+
+Baseline: 16 (lower) - 18 (higher) tasks at 488 runs/s (lower)- 608 runs/s (higher)
+
+'''
+
 import time
 
 _monotonic_ns = time.monotonic_ns
