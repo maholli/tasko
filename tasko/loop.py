@@ -1,15 +1,3 @@
-'''
-CHANGES MADE:
-
-1) Created a _ready list that keeps track of all tasks ready to be executed.
-2) Sort this _ready list based on priority.
-3) Don't sort the _sleeping list in _sleep_until_nanos, as it adds latency.
-   Instead, sort it in _step, only when the system is ACTUALLY going to sleep.
-
-Baseline: 16 (lower) - 18 (higher) tasks at 488 runs/s (lower)- 608 runs/s (higher)
-
-'''
-
 import time
 
 _monotonic_ns = time.monotonic_ns
@@ -101,7 +89,6 @@ class ScheduledTask:
         self._stop = False
         self._running = False
         self._scheduled_to_run = False
-        # Added a priority level
         self._priority = priority
 
     async def _run_at_fixed_rate(self):
@@ -317,7 +304,6 @@ class Loop:
         self._tasks.sort(key=Task.priority_sort)
 
         for _ in range(len(self._tasks)):
-
             task = self._tasks.pop(0)
             self._run_task(task)
 
@@ -339,8 +325,7 @@ class Loop:
 
         #Run the ready tasks, and simultaneously remove them from the _sleeping and _ready lists
         for i in range(len(self._ready)):
-            ready_task = self._ready[0]
-            self._ready.pop(0)
+            ready_task = self._ready.pop(0)
             self._sleeping.remove(ready_task)
             self._run_task(ready_task.task)
 
@@ -352,7 +337,6 @@ class Loop:
 
             self._sleeping.sort(key=Sleeper.resume_nanos)
             next_sleeper = self._sleeping[0]
-
             sleep_nanos = next_sleeper.resume_nanos() - _monotonic_ns()
 
             if sleep_nanos > 0:
